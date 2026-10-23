@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>HUD IRL Live</title>
+    <style>
+        /* Zera as margens e define o fundo preto */
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background-color: #000; overflow: hidden; font-family: 'Courier New', Courier, monospace; color: white; user-select: none; }
+        
+        /* A câmera fica no fundo ocupando 100% da tela */
+        #camera-feed { position: absolute; top: 0; left: 0; width: 100%; height: 100%; object-fit: cover; z-index: 1; }
+        
+        /* O HUD fica por cima (z-index maior) com fundo transparente */
+        #hud-container { position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10; pointer-events: none; display: flex; flex-direction: column; justify-content: space-between; padding: 20px; box-sizing: border-box; }
+        
+        /* Estilização das Barras de Status */
+        .bar-container { background: rgba(0, 0, 0, 0.6); border: 2px solid #fff; width: 220px; height: 22px; margin-bottom: 12px; position: relative; }
+        .bar-fill { height: 100%; transition: width 0.3s linear; }
+        
+        #stamina-fill { background-color: #4caf50; width: 100%; }
+        #battery-fill { background-color: #ffeb3b; width: 100%; }
+        #sanity-fill { background-color: #9c27b0; width: 100%; }
+        
+        .bar-label { position: absolute; top: 2px; left: 8px; font-size: 14px; font-weight: bold; text-shadow: 1px 1px 2px #000; }
+        
+        /* Estilização do Mini Radar */
+        #radar { width: 130px; height: 130px; border-radius: 50%; border: 2px solid #fff; background: rgba(0, 255, 0, 0.15); position: absolute; bottom: 20px; right: 20px; display: flex; justify-content: center; align-items: center; overflow: hidden; box-shadow: 0 0 10px rgba(0, 255, 0, 0.5); }
+        #radar::before { content: ''; position: absolute; width: 100%; height: 1px; background: rgba(255,255,255,0.4); }
+        #radar::after { content: ''; position: absolute; width: 1px; height: 100%; background: rgba(255,255,255,0.4); }
+        
+        /* Ponto vermelho (anomalia/objetivo) piscando no radar */
+        .blip { width: 10px; height: 10px; background: red; border-radius: 50%; position: absolute; top: 25%; left: 65%; box-shadow: 0 0 8px red; animation: blink 1.5s infinite; }
+        @keyframes blink { 0% { opacity: 0; } 50% { opacity: 1; } 100% { opacity: 0; } }
+        
+        /* Botão inicial (necessário para o navegador liberar a câmera e a tela cheia) */
+        #start-btn { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); z-index: 100; padding: 15px 30px; font-size: 18px; background: #fff; color: #000; border: none; cursor: pointer; pointer-events: auto; font-family: 'Courier New', Courier, monospace; font-weight: bold; text-transform: uppercase; box-shadow: 4px 4px 0px #555; transition: transform 0.1s; }
+        #start-btn:active { transform: translate(-50%, -50%) scale(0.95); }
+    </style>
+</head>
+<body>
+
+    <!-- Vídeo onde a imagem da câmera será injetada -->
+    <video id="camera-feed" autoplay playsinline></video>
+
+    <!-- Botão de Start -->
+    <button id="start-btn">Iniciar HUD / Ligar Câmera</button>
+
+    <!-- Camada do HUD (Escondida até clicar em Iniciar) -->
+    <div id="hud-container" style="display: none;">
+        <div id="stats">
+            <div class="bar-container">
+                <div id="stamina-fill" class="bar-fill"></div>
+                <span class="bar-label">ESTAMINA</span>
+            </div>
+            <div class="bar-container">
+                <div id="battery-fill" class="bar-fill"></div>
+                <span class="bar-label">BATERIA (LANTERNA)</span>
+            </div>
+            <div class="bar-container">
+                <div id="sanity-fill" class="bar-fill"></div>
+                <span class="bar-label">SANIDADE</span>
+            </div>
+        </div>
+
+        <div id="radar">
+            <div class="blip" id="radar-blip"></div>
+        </div>
+    </div>
+
+    <script>
+        const video = document.getElementById('camera-feed');
+        const startBtn = document.getElementById('start-btn');
+        const hud = document.getElementById('hud-container');
+        
+        // Elementos das barras
+        const batteryFill = document.getElementById('battery-fill');
+        const staminaFill = document.getElementById('stamina-fill');
+        
+        // Variáveis do "jogo"
+        let battery = 100;
+        let stamina = 100;
+
+        // O que acontece ao clicar no botão
+        startBtn.addEventListener('click', async () => {
+            try {
+                // Solicita a câmera. 'facingMode: environment' tenta forçar a câmera traseira do celular
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'environment' },
+                    audio: false
+                });
+                
+                video.srcObject = stream;
+
+                // Força o navegador a entrar em tela cheia (esconde barras de navegação)
+                if (document.documentElement.requestFullscreen) {
+                    document.documentElement.requestFullscreen();
+                }
+
+                // Troca a interface: esconde o botão, mostra o HUD
+                startBtn.style.display = 'none';
+                hud.style.display = 'flex';
+
+                // Inicia o loop de simulação das barras caindo
+                iniciarLoopDoJogo();
+
+            } catch (err) {
+                alert("Erro ao acessar a câmera: " + err.message + "\nCertifique-se de estar rodando em localhost ou HTTPS.");
+            }
+        });
+
+        function iniciarLoopDoJogo() {
+            // Um timer simples que roda a cada 1 segundo (1000ms)
+            setInterval(() => {
+                // Drena a bateria lentamente
+                if(battery > 0) {
+                    battery -= 0.5;
+                    batteryFill.style.width = battery + '%';
+                }
+                
+                // Drena a estamina mais rápido (simulando caminhada)
+                if(stamina > 0) {
+                    stamina -= 1.5;
+                    if(stamina < 0) stamina = 0;
+                    staminaFill.style.width = stamina + '%';
+                }
+                
+                // Aqui no futuro entraria a lógica de "se a bateria zerar, pinta a tela de preto"
+                
+            }, 1000);
+        }
+    </script>
+</body>
+</html>
